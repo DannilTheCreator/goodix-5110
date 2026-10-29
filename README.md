@@ -6,7 +6,8 @@ the Goodix TLS 511 reader (`27c6:5110`). It was tested on Arch Linux with
 
 Without the fix, stopping verification after failed scans can block a password
 unlock while the Goodix driver waits for its pending read. With the fix,
-`VerifyStop` cancels the read and completes the driver state machine promptly.
+`VerifyStop` cancels the read, allows the next operation to restart the read
+loop, and completes the driver state machine promptly.
 
 ## Requirements
 

@@ -1,5 +1,5 @@
 From: DannilTheCreator
-Subject: [PATCH] goodixtls: cancel active 5xx operations promptly
+Subject: [PATCH] goodixtls: restart read loop after cancelling 5xx operations
 
 The Goodix TLS 511 driver did not provide an FpDeviceClass cancel handler.
 When fprintd received VerifyStop, a pending read could therefore keep the
@@ -8,21 +8,22 @@ the fingerprint device before password authentication would wait for that
 timeout.
 
 Cancel the transport read, clear the protocol timeout and fail the active
-verify/identify state machine with G_IO_ERROR_CANCELLED.
+verify/identify state machine with G_IO_ERROR_CANCELLED. Mark the read loop
+stopped so the next operation restarts it instead of timing out.
 
 Tested with USB 27c6:5110 (Goodix TLS Fingerprint Sensor 511).
 
 ---
- libfprint/drivers/goodixtls/goodix.c    | 9 +++++++++
+ libfprint/drivers/goodixtls/goodix.c    | 10 ++++++++++
  libfprint/drivers/goodixtls/goodix.h    | 4 ++++
  libfprint/drivers/goodixtls/goodix5xx.c | 18 ++++++++++++++++++
- 3 files changed, 31 insertions(+)
+ 3 files changed, 32 insertions(+)
 
 diff --git a/libfprint/drivers/goodixtls/goodix.c b/libfprint/drivers/goodixtls/goodix.c
 index 1a61cc9..d898480 100644
 --- a/libfprint/drivers/goodixtls/goodix.c
 +++ b/libfprint/drivers/goodixtls/goodix.c
-@@ -902,6 +902,15 @@ goodix_reset_state(FpDevice *dev)
+@@ -902,6 +902,16 @@ goodix_reset_state(FpDevice *dev)
    priv->user_data = NULL;
  }
  
@@ -32,6 +33,7 @@ index 1a61cc9..d898480 100644
 +  FpiDeviceGoodixTls *self = FPI_DEVICE_GOODIXTLS(dev);
 +  FpiDeviceGoodixTlsPrivate *priv = fpi_device_goodixtls_get_instance_private(self);
 +
++  priv->inited = FALSE;
 +  g_cancellable_cancel(priv->transfer_cancel_tkn);
 +}
 +
