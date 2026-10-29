@@ -1,0 +1,93 @@
+From: DannilTheCreator
+Subject: [PATCH] goodixtls: cancel active 5xx operations promptly
+
+The Goodix TLS 511 driver did not provide an FpDeviceClass cancel handler.
+When fprintd received VerifyStop, a pending read could therefore keep the
+operation alive until its protocol timeout. Desktop lock screens that release
+the fingerprint device before password authentication would wait for that
+timeout.
+
+Cancel the transport read, clear the protocol timeout and fail the active
+verify/identify state machine with G_IO_ERROR_CANCELLED.
+
+Tested with USB 27c6:5110 (Goodix TLS Fingerprint Sensor 511).
+
+---
+ libfprint/drivers/goodixtls/goodix.c    | 9 +++++++++
+ libfprint/drivers/goodixtls/goodix.h    | 4 ++++
+ libfprint/drivers/goodixtls/goodix5xx.c | 18 ++++++++++++++++++
+ 3 files changed, 31 insertions(+)
+
+diff --git a/libfprint/drivers/goodixtls/goodix.c b/libfprint/drivers/goodixtls/goodix.c
+index 1a61cc9..d898480 100644
+--- a/libfprint/drivers/goodixtls/goodix.c
++++ b/libfprint/drivers/goodixtls/goodix.c
+@@ -902,6 +902,15 @@ goodix_reset_state(FpDevice *dev)
+   priv->user_data = NULL;
+ }
+ 
++void
++goodix_cancel_transfers(FpDevice *dev)
++{
++  FpiDeviceGoodixTls *self = FPI_DEVICE_GOODIXTLS(dev);
++  FpiDeviceGoodixTlsPrivate *priv = fpi_device_goodixtls_get_instance_private(self);
++
++  g_cancellable_cancel(priv->transfer_cancel_tkn);
++}
++
+ gboolean
+ goodix_dev_deinit(FpDevice *dev, GError **error)
+ {
+diff --git a/libfprint/drivers/goodixtls/goodix.h b/libfprint/drivers/goodixtls/goodix.h
+index c80d162..c1c7816 100644
+--- a/libfprint/drivers/goodixtls/goodix.h
++++ b/libfprint/drivers/goodixtls/goodix.h
+@@ -201,6 +201,10 @@ goodix_dev_deinit(FpDevice *dev, GError **error);
+ void
+ goodix_reset_state(FpDevice *dev);
+ 
++/* Cancel any pending USB transfers for the current operation. */
++void
++goodix_cancel_transfers(FpDevice *dev);
++
+ /* ---- DEV SECTION END ---- */
+ 
+ /* ----------------------------------------------------------------------------- */
+diff --git a/libfprint/drivers/goodixtls/goodix5xx.c b/libfprint/drivers/goodixtls/goodix5xx.c
+index 7b04d05..ce78462 100644
+--- a/libfprint/drivers/goodixtls/goodix5xx.c
++++ b/libfprint/drivers/goodixtls/goodix5xx.c
+@@ -1327,6 +1327,23 @@ dev_verify_identify (FpDevice *dev)
+   fpi_ssm_start (priv->task_ssm, verify_ssm_done);
+ }
+ 
++static void
++dev_cancel (FpDevice *dev)
++{
++  FpiDeviceGoodixTls5xx *self = FPI_DEVICE_GOODIXTLS5XX (dev);
++  FpiDeviceGoodixTls5xxPrivate *priv =
++    fpi_device_goodixtls5xx_get_instance_private (self);
++
++  if (priv->task_ssm == NULL)
++    return;
++
++  goodix_cancel_transfers (dev);
++  goodix_reset_state (dev);
++  fpi_ssm_mark_failed (priv->task_ssm,
++                       g_error_new (G_IO_ERROR, G_IO_ERROR_CANCELLED,
++                                    "Fingerprint operation cancelled"));
++}
++
+ /* ---- GObject class init ---- */
+ 
+ void
+@@ -1346,6 +1363,7 @@ fpi_device_goodixtls5xx_class_init(FpiDeviceGoodixTls5xxClass *self)
+   dev_cls->enroll   = dev_enroll;
+   dev_cls->verify   = dev_verify_identify;
+   dev_cls->identify = dev_verify_identify;
++  dev_cls->cancel   = dev_cancel;
+ }
+ 
+ void
+-- 
+2.52.0
